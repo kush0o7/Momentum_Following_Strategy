@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime as dt
 import io
 
+import pandas as pd
 import streamlit as st
 
 from momentum_strategy.backtest import run_backtest
@@ -13,6 +14,9 @@ from momentum_strategy.evaluation import (
     compute_equity_curve,
     compute_metrics,
     run_grid_search,
+    simulate_portfolio,
+    portfolio_metrics,
+    walk_forward_optimize,
 )
 from momentum_strategy.report import build_report_figure, get_metrics
 from momentum_strategy.signals import generate_crossover_signals
@@ -108,13 +112,23 @@ with st.sidebar:
     long_range = st.slider("Long MA Range", 50, 250, (80, 150), step=5)
     atr_stop_range = st.slider("ATR Stop Mult Range", 0.0, 5.0, (1.5, 3.0), step=0.1)
     max_combos = st.number_input("Max Combos", min_value=20, max_value=1000, value=200, step=20)
+    wf_train_days = st.number_input("WFO Train Days", min_value=90, max_value=720, value=365, step=30)
+    wf_test_days = st.number_input("WFO Test Days", min_value=60, max_value=360, value=180, step=30)
     run_opt = st.button("Run Optimizer", use_container_width=True)
+    run_wfo = st.button("Run Walk-Forward Optimizer", use_container_width=True)
 
     st.divider()
     st.header("Watchlist")
     watchlist_raw = st.text_area("Symbols (comma-separated)", value="AAPL, MSFT, NVDA, TSLA")
     optimize_watchlist = st.checkbox("Optimize Each", value=False)
     run_watchlist = st.button("Run Watchlist", use_container_width=True)
+    st.subheader("Portfolio")
+    rebalance_days = st.number_input("Rebalance Days", min_value=5, max_value=120, value=21, step=1)
+    costs_file = st.file_uploader(
+        "Per-Asset Costs CSV (symbol,commission,slippage as decimal)",
+        type=["csv"],
+    )
+    run_portfolio = st.button("Run Portfolio", use_container_width=True)
 
 
 def _build_config() -> BacktestConfig:
@@ -168,7 +182,13 @@ if run:
             atr_period=config.atr_period,
             atr_stop_mult=config.atr_stop_mult,
         )
-        equity = compute_equity_curve(df, signals, config.cash)
+        equity = compute_equity_curve(
+            df,
+            signals,
+            config.cash,
+            commission_perc=config.commission,
+            slippage_perc=config.slippage_perc,
+        )
         benchmark = config.cash * (df["close"] / df["close"].iloc[0])
         bench_metrics = buy_hold_metrics(df, config.cash)
 
@@ -227,11 +247,39 @@ if run_opt:
             [config.atr_period],
             atr_stop_list,
             max_combos=int(max_combos),
+            commission_perc=config.commission,
+            slippage_perc=config.slippage_perc,
         )
         st.subheader("Optimizer Leaderboard")
         st.dataframe(results.head(20), use_container_width=True)
     except Exception as exc:
         st.error(f"Optimizer error: {exc}")
+
+if run_wfo:
+    try:
+        config = _build_config()
+        short_list = list(range(short_range[0], short_range[1] + 1, 2))
+        long_list = list(range(long_range[0], long_range[1] + 1, 5))
+        atr_stop_list = [
+            round(atr_stop_range[0], 2),
+            round((atr_stop_range[0] + atr_stop_range[1]) / 2, 2),
+            round(atr_stop_range[1], 2),
+        ]
+        wfo = walk_forward_optimize(
+            config,
+            train_days=int(wf_train_days),
+            test_days=int(wf_test_days),
+            short_list=short_list,
+            long_list=long_list,
+            atr_stop_list=atr_stop_list,
+            trend_filter_list=[True, False],
+            atr_period_list=[config.atr_period],
+            max_combos=int(max_combos),
+        )
+        st.subheader("Walk-Forward Optimizer")
+        st.dataframe(wfo, use_container_width=True)
+    except Exception as exc:
+        st.error(f"Walk-forward error: {exc}")
 
 if run_watchlist:
     symbols = [s.strip().upper() for s in watchlist_raw.split(",") if s.strip()]
@@ -249,6 +297,8 @@ if run_watchlist:
                     [atr_period],
                     [atr_stop_mult],
                     max_combos=120,
+                    commission_perc=float(commission),
+                    slippage_perc=float(slippage_perc) / 100.0,
                 )
                 best = results.iloc[0].to_dict() if not results.empty else {}
                 rows.append({"symbol": sym, **best})
@@ -261,7 +311,13 @@ if run_watchlist:
                     atr_period=int(atr_period),
                     atr_stop_mult=float(atr_stop_mult),
                 )
-                metrics = compute_metrics(df, signals, cash)
+                metrics = compute_metrics(
+                    df,
+                    signals,
+                    cash,
+                    commission_perc=float(commission),
+                    slippage_perc=float(slippage_perc) / 100.0,
+                )
                 rows.append(
                     {
                         "symbol": sym,
@@ -278,5 +334,45 @@ if run_watchlist:
     st.subheader("Watchlist Results")
     st.dataframe(rows, use_container_width=True)
 
-if not (run or run_opt or run_watchlist):
+if run_portfolio:
+    symbols = [s.strip().upper() for s in watchlist_raw.split(",") if s.strip()]
+    data_map = {sym: fetch_yfinance_data(sym, start, end) for sym in symbols}
+    slippage_rate = float(slippage_perc) / 100.0
+    asset_costs = None
+    if costs_file is not None:
+        try:
+            costs_df = pd.read_csv(costs_file)
+            asset_costs = {
+                row["symbol"].strip().upper(): {
+                    "commission": float(row.get("commission", commission)),
+                    "slippage": float(row.get("slippage", slippage_rate)),
+                }
+                for _, row in costs_df.iterrows()
+            }
+        except Exception as exc:
+            st.error(f"Cost file error: {exc}")
+            asset_costs = None
+
+    try:
+        config = _build_config()
+        equity = simulate_portfolio(
+            data_map,
+            config,
+            rebalance_days=int(rebalance_days),
+            asset_costs=asset_costs,
+        )
+        metrics = portfolio_metrics(equity)
+        st.subheader("Portfolio Equity")
+        st.line_chart(equity)
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            _kpi("Portfolio Sharpe", f"{metrics.sharpe:.2f}")
+        with c2:
+            _kpi("Portfolio Max DD (%)", f"{metrics.max_drawdown:.2f}")
+        with c3:
+            _kpi("Portfolio CAGR", f"{metrics.cagr:.2%}")
+    except Exception as exc:
+        st.error(f"Portfolio error: {exc}")
+
+if not (run or run_opt or run_wfo or run_watchlist or run_portfolio):
     st.info("Set parameters and run a backtest, optimizer, or watchlist scan.")

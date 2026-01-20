@@ -51,7 +51,13 @@ def build_report_figure(df: pd.DataFrame, config: BacktestConfig) -> plt.Figure:
         atr_period=config.atr_period,
         atr_stop_mult=config.atr_stop_mult,
     )
-    equity = compute_equity_curve(df, signals, config.cash)
+    equity = compute_equity_curve(
+        df,
+        signals,
+        config.cash,
+        commission_perc=config.commission,
+        slippage_perc=config.slippage_perc,
+    )
 
     short_sma = df["close"].rolling(window=config.short_ma).mean()
     long_sma = df["close"].rolling(window=config.long_ma).mean()

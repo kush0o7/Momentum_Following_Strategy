@@ -9,6 +9,7 @@ Industry-style backtesting project using Backtrader + yfinance with a clean CLI,
 - Custom recruiter-friendly report (price, SMA, signals, equity)
 - Risk controls: trend filter + ATR trailing stop
 - Execution realism: slippage + risk-based position sizing
+- Walk-forward optimizer (train/test) and portfolio mode
 - Security-minded defaults (no secrets in code, no external writes)
 
 ## Project Structure
@@ -68,10 +69,30 @@ Dashboard features:
 - KPI cards and equity benchmark vs buy-and-hold
 - Optimizer leaderboard for SMA/ATR settings
 - Multi-symbol watchlist scan
+- Walk-forward optimizer and portfolio mode
 - Export report as PNG/PDF
 
 ## Walk-Forward (Out-of-Sample)
 ```bash
 python -m momentum_strategy --symbol AAPL --start 2018-01-01 --end 2023-12-31 \\
   --short-ma 20 --long-ma 100 --walk-forward --wf-train-days 365 --wf-test-days 180
+```
+
+## Walk-Forward Optimizer
+```bash
+python -m momentum_strategy --symbol AAPL --start 2018-01-01 --end 2023-12-31 \\
+  --walk-forward-opt --opt-short-min 10 --opt-short-max 30 --opt-long-min 80 --opt-long-max 150
+```
+
+## Portfolio Mode (CLI)
+```bash
+python -m momentum_strategy --portfolio --symbols AAPL,MSFT,NVDA,TSLA \\
+  --start 2020-01-01 --end 2023-01-01 --rebalance-days 21
+```
+
+Per-asset costs CSV format:
+```csv
+symbol,commission,slippage
+AAPL,0.001,0.0005
+MSFT,0.0008,0.0004
 ```
