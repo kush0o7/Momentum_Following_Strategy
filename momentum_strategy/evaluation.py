@@ -108,41 +108,63 @@ def run_grid_search(
     max_combos: int = 200,
     commission_perc: float = 0.0,
     slippage_perc: float = 0.0,
+    rsi_period_list: Iterable[int] | None = None,
+    rsi_entry_list: Iterable[float] | None = None,
+    rsi_exit_list: Iterable[float] | None = None,
+    atr_vol_min_list: Iterable[float] | None = None,
 ) -> pd.DataFrame:
     rows = []
+    rsi_period_list = rsi_period_list or [14]
+    rsi_entry_list = rsi_entry_list or [55.0]
+    rsi_exit_list = rsi_exit_list or [45.0]
+    atr_vol_min_list = atr_vol_min_list or [0.0]
     combos = list(product(short_list, long_list, trend_filter_list, atr_period_list, atr_stop_mult_list))
     for short_ma, long_ma, trend_filter, atr_period, atr_stop_mult in combos[:max_combos]:
         if short_ma >= long_ma:
             continue
-        signals = generate_crossover_signals(
-            df,
-            short_ma=short_ma,
-            long_ma=long_ma,
-            trend_filter=trend_filter,
-            atr_period=atr_period,
-            atr_stop_mult=atr_stop_mult,
-        )
-        metrics = compute_metrics(
-            df,
-            signals,
-            starting_cash,
-            commission_perc=commission_perc,
-            slippage_perc=slippage_perc,
-        )
-        rows.append(
-            {
-                "short_ma": short_ma,
-                "long_ma": long_ma,
-                "trend_filter": trend_filter,
-                "atr_period": atr_period,
-                "atr_stop_mult": atr_stop_mult,
-                "total_return": metrics.total_return,
-                "cagr": metrics.cagr,
-                "sharpe": metrics.sharpe,
-                "max_drawdown": metrics.max_drawdown,
-                "trades": metrics.trades,
-            }
-        )
+        for rsi_period in rsi_period_list:
+            for rsi_entry in rsi_entry_list:
+                for rsi_exit in rsi_exit_list:
+                    if rsi_exit >= rsi_entry:
+                        continue
+                    for atr_vol_min in atr_vol_min_list:
+                        signals = generate_crossover_signals(
+                            df,
+                            short_ma=short_ma,
+                            long_ma=long_ma,
+                            trend_filter=trend_filter,
+                            atr_period=atr_period,
+                            atr_stop_mult=atr_stop_mult,
+                            rsi_period=rsi_period,
+                            rsi_entry=rsi_entry,
+                            rsi_exit=rsi_exit,
+                            atr_vol_min=atr_vol_min,
+                        )
+                        metrics = compute_metrics(
+                            df,
+                            signals,
+                            starting_cash,
+                            commission_perc=commission_perc,
+                            slippage_perc=slippage_perc,
+                        )
+                        rows.append(
+                            {
+                                "short_ma": short_ma,
+                                "long_ma": long_ma,
+                                "trend_filter": trend_filter,
+                                "atr_period": atr_period,
+                                "atr_stop_mult": atr_stop_mult,
+                                "rsi_period": rsi_period,
+                                "rsi_entry": rsi_entry,
+                                "rsi_exit": rsi_exit,
+                                "atr_vol_min": atr_vol_min,
+                                "total_return": metrics.total_return,
+                                "cagr": metrics.cagr,
+                                "sharpe": metrics.sharpe,
+                                "max_drawdown": metrics.max_drawdown,
+                                "trades": metrics.trades,
+                            }
+                        )
 
     return pd.DataFrame(rows).sort_values(by=["sharpe", "total_return"], ascending=False)
 
@@ -171,6 +193,10 @@ def walk_forward_report(
             trend_filter=config.trend_filter,
             atr_period=config.atr_period,
             atr_stop_mult=config.atr_stop_mult,
+            rsi_period=config.rsi_period,
+            rsi_entry=config.rsi_entry,
+            rsi_exit=config.rsi_exit,
+            atr_vol_min=config.atr_vol_min,
         )
         train_metrics = compute_metrics(
             train_df,
@@ -187,6 +213,10 @@ def walk_forward_report(
             trend_filter=config.trend_filter,
             atr_period=config.atr_period,
             atr_stop_mult=config.atr_stop_mult,
+            rsi_period=config.rsi_period,
+            rsi_entry=config.rsi_entry,
+            rsi_exit=config.rsi_exit,
+            atr_vol_min=config.atr_vol_min,
         )
         test_metrics = compute_metrics(
             test_df,
@@ -252,6 +282,10 @@ def walk_forward_optimize(
             max_combos=max_combos,
             commission_perc=config.commission,
             slippage_perc=config.slippage_perc,
+            rsi_period_list=[config.rsi_period],
+            rsi_entry_list=[config.rsi_entry],
+            rsi_exit_list=[config.rsi_exit],
+            atr_vol_min_list=[config.atr_vol_min],
         )
         if leaderboard.empty:
             break
@@ -264,6 +298,10 @@ def walk_forward_optimize(
             trend_filter=bool(best["trend_filter"]),
             atr_period=int(best["atr_period"]),
             atr_stop_mult=float(best["atr_stop_mult"]),
+            rsi_period=int(best.get("rsi_period", config.rsi_period)),
+            rsi_entry=float(best.get("rsi_entry", config.rsi_entry)),
+            rsi_exit=float(best.get("rsi_exit", config.rsi_exit)),
+            atr_vol_min=float(best.get("atr_vol_min", config.atr_vol_min)),
         )
         test_metrics = compute_metrics(
             test_df,

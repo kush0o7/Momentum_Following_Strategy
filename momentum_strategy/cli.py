@@ -29,6 +29,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--atr-stop-mult", type=float, default=2.0)
     parser.add_argument("--risk-per-trade", type=float, default=0.01)
     parser.add_argument("--slippage-perc", type=float, default=0.0005)
+    parser.add_argument("--rsi-period", type=int, default=14)
+    parser.add_argument("--rsi-entry", type=float, default=55.0)
+    parser.add_argument("--rsi-exit", type=float, default=45.0)
+    parser.add_argument("--atr-vol-min", type=float, default=0.0)
     parser.add_argument("--walk-forward", action="store_true")
     parser.add_argument("--wf-train-days", type=int, default=365)
     parser.add_argument("--wf-test-days", type=int, default=180)
@@ -44,6 +48,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--symbols", default="AAPL,MSFT,NVDA,TSLA")
     parser.add_argument("--rebalance-days", type=int, default=21)
     parser.add_argument("--costs-file", default=None)
+    parser.add_argument("--live", action="store_true")
+    parser.add_argument("--live-interval", default="5m")
+    parser.add_argument("--live-lookback-days", type=int, default=30)
+    parser.add_argument("--live-refresh-sec", type=int, default=60)
     parser.add_argument("--cash", type=float, default=10000.0)
     parser.add_argument("--commission", type=float, default=0.001)
     parser.add_argument("--plot", action="store_true")
@@ -68,6 +76,10 @@ def main() -> None:
         atr_stop_mult=args.atr_stop_mult,
         risk_per_trade=args.risk_per_trade,
         slippage_perc=args.slippage_perc,
+        rsi_period=args.rsi_period,
+        rsi_entry=args.rsi_entry,
+        rsi_exit=args.rsi_exit,
+        atr_vol_min=args.atr_vol_min,
         cash=args.cash,
         commission=args.commission,
         plot=args.plot,
@@ -139,6 +151,15 @@ def main() -> None:
         print(f"Sharpe: {metrics.sharpe:.2f}")
         print(f"Max Drawdown (%): {metrics.max_drawdown:.2f}")
         print(f"CAGR: {metrics.cagr:.2%}")
+    elif args.live:
+        from .realtime import run_live
+
+        run_live(
+            config,
+            interval=args.live_interval,
+            lookback_days=args.live_lookback_days,
+            refresh_sec=args.live_refresh_sec,
+        )
     else:
         cerebro, strategy, df = run_backtest(config)
         print_metrics(config, strategy)

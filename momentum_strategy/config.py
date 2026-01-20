@@ -16,6 +16,10 @@ class BacktestConfig:
     atr_stop_mult: float = 2.0
     risk_per_trade: float = 0.01
     slippage_perc: float = 0.0005
+    rsi_period: int = 14
+    rsi_entry: float = 55.0
+    rsi_exit: float = 45.0
+    atr_vol_min: float = 0.0
     cash: float = 10000.0
     commission: float = 0.001
     plot: bool = False
@@ -38,6 +42,14 @@ class BacktestConfig:
             raise ValueError("risk_per_trade must be between 0 and 1.")
         if self.slippage_perc < 0:
             raise ValueError("slippage_perc cannot be negative.")
+        if self.rsi_period <= 0:
+            raise ValueError("rsi_period must be positive.")
+        if not (0 <= self.rsi_exit <= 100) or not (0 <= self.rsi_entry <= 100):
+            raise ValueError("RSI thresholds must be between 0 and 100.")
+        if self.rsi_exit >= self.rsi_entry:
+            raise ValueError("rsi_exit must be less than rsi_entry.")
+        if self.atr_vol_min < 0:
+            raise ValueError("atr_vol_min cannot be negative.")
         if self.cash <= 0:
             raise ValueError("cash must be positive.")
         if self.commission < 0:

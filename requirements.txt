@@ -4,3 +4,4 @@ yfinance
 pytest
 matplotlib
 streamlit
+scikit-learn

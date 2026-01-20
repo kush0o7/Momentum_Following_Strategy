@@ -50,6 +50,10 @@ def build_report_figure(df: pd.DataFrame, config: BacktestConfig) -> plt.Figure:
         trend_filter=config.trend_filter,
         atr_period=config.atr_period,
         atr_stop_mult=config.atr_stop_mult,
+        rsi_period=config.rsi_period,
+        rsi_entry=config.rsi_entry,
+        rsi_exit=config.rsi_exit,
+        atr_vol_min=config.atr_vol_min,
     )
     equity = compute_equity_curve(
         df,

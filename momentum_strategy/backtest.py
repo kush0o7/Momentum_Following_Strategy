@@ -29,6 +29,10 @@ def run_backtest(config: BacktestConfig) -> tuple[bt.Cerebro, bt.Strategy, "pd.D
         atr_period=config.atr_period,
         atr_stop_mult=config.atr_stop_mult,
         risk_per_trade=config.risk_per_trade,
+        rsi_period=config.rsi_period,
+        rsi_entry=config.rsi_entry,
+        rsi_exit=config.rsi_exit,
+        atr_vol_min=config.atr_vol_min,
     )
     cerebro.broker.setcash(config.cash)
     cerebro.broker.setcommission(commission=config.commission)

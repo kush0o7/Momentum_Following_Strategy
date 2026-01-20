@@ -5,7 +5,9 @@ import io
 
 import pandas as pd
 import streamlit as st
+import yfinance as yf
 
+from momentum_strategy.ai import train_ai_model
 from momentum_strategy.backtest import run_backtest
 from momentum_strategy.config import BacktestConfig
 from momentum_strategy.data import fetch_yfinance_data
@@ -77,6 +79,16 @@ h1, h2, h3, h4 {
     unsafe_allow_html=True,
 )
 
+if "reset_widgets" not in st.session_state:
+    st.session_state["reset_widgets"] = False
+
+if st.sidebar.button("Reset Widgets", width="stretch"):
+    for key in list(st.session_state.keys()):
+        if key != "reset_widgets":
+            del st.session_state[key]
+    st.session_state["reset_widgets"] = True
+    st.rerun()
+
 st.markdown(
     """
 <div class="hero">
@@ -100,35 +112,47 @@ with st.sidebar:
     trend_filter = st.checkbox("Trend Filter", value=True)
     atr_period = st.number_input("ATR Period", min_value=2, max_value=100, value=14)
     atr_stop_mult = st.number_input("ATR Stop Mult", min_value=0.0, max_value=10.0, value=2.0, step=0.1)
+    rsi_period = st.number_input("RSI Period", min_value=2, max_value=50, value=14)
+    rsi_entry = st.number_input("RSI Entry", min_value=0.0, max_value=100.0, value=55.0, step=1.0)
+    rsi_exit = st.number_input("RSI Exit", min_value=0.0, max_value=100.0, value=45.0, step=1.0)
+    atr_vol_min = st.number_input("ATR Vol Min", min_value=0.0, max_value=0.2, value=0.0, step=0.01)
     risk_per_trade = st.number_input("Risk Per Trade", min_value=0.001, max_value=0.1, value=0.01, step=0.001, format="%.3f")
     slippage_perc = st.number_input("Slippage (%)", min_value=0.0, max_value=0.5, value=0.05, step=0.01)
     cash = st.number_input("Starting Cash", min_value=1000.0, value=10000.0, step=1000.0)
     commission = st.number_input("Commission", min_value=0.0, value=0.001, step=0.0005, format="%.4f")
-    run = st.button("Run Backtest", use_container_width=True)
+    run = st.button("Run Backtest", width="stretch")
 
     st.divider()
     st.header("Optimizer")
     short_range = st.slider("Short MA Range", 5, 60, (10, 30), step=2)
     long_range = st.slider("Long MA Range", 50, 250, (80, 150), step=5)
-    atr_stop_range = st.slider("ATR Stop Mult Range", 0.0, 5.0, (1.5, 3.0), step=0.1)
+    atr_stop_range_raw = st.slider(
+        "ATR Stop Mult Range (x0.1)",
+        0,
+        50,
+        (15, 30),
+        step=1,
+        key="atr_stop_range_raw_v2",
+    )
+    atr_stop_range = (atr_stop_range_raw[0] / 10, atr_stop_range_raw[1] / 10)
     max_combos = st.number_input("Max Combos", min_value=20, max_value=1000, value=200, step=20)
     wf_train_days = st.number_input("WFO Train Days", min_value=90, max_value=720, value=365, step=30)
     wf_test_days = st.number_input("WFO Test Days", min_value=60, max_value=360, value=180, step=30)
-    run_opt = st.button("Run Optimizer", use_container_width=True)
-    run_wfo = st.button("Run Walk-Forward Optimizer", use_container_width=True)
+    run_opt = st.button("Run Optimizer", width="stretch")
+    run_wfo = st.button("Run Walk-Forward Optimizer", width="stretch")
 
     st.divider()
     st.header("Watchlist")
     watchlist_raw = st.text_area("Symbols (comma-separated)", value="AAPL, MSFT, NVDA, TSLA")
     optimize_watchlist = st.checkbox("Optimize Each", value=False)
-    run_watchlist = st.button("Run Watchlist", use_container_width=True)
+    run_watchlist = st.button("Run Watchlist", width="stretch")
     st.subheader("Portfolio")
     rebalance_days = st.number_input("Rebalance Days", min_value=5, max_value=120, value=21, step=1)
     costs_file = st.file_uploader(
         "Per-Asset Costs CSV (symbol,commission,slippage as decimal)",
         type=["csv"],
     )
-    run_portfolio = st.button("Run Portfolio", use_container_width=True)
+    run_portfolio = st.button("Run Portfolio", width="stretch")
 
 
 def _build_config() -> BacktestConfig:
@@ -143,6 +167,10 @@ def _build_config() -> BacktestConfig:
         atr_stop_mult=float(atr_stop_mult),
         risk_per_trade=float(risk_per_trade),
         slippage_perc=float(slippage_perc) / 100.0,
+        rsi_period=int(rsi_period),
+        rsi_entry=float(rsi_entry),
+        rsi_exit=float(rsi_exit),
+        atr_vol_min=float(atr_vol_min),
         cash=float(cash),
         commission=float(commission),
     )
@@ -181,6 +209,10 @@ if run:
             trend_filter=config.trend_filter,
             atr_period=config.atr_period,
             atr_stop_mult=config.atr_stop_mult,
+            rsi_period=config.rsi_period,
+            rsi_entry=config.rsi_entry,
+            rsi_exit=config.rsi_exit,
+            atr_vol_min=config.atr_vol_min,
         )
         equity = compute_equity_curve(
             df,
@@ -205,14 +237,53 @@ if run:
 
         st.subheader("Momentum Report")
         fig = build_report_figure(df, config)
-        st.pyplot(fig, use_container_width=True)
+        st.pyplot(fig, width="stretch")
+
+        st.subheader("AI Research Signal")
+        if st.button("Train AI Model", width="stretch"):
+            ai_result = train_ai_model(df)
+            st.write(f"Model: {ai_result.model_name}")
+            st.write(f"Accuracy: {ai_result.accuracy:.2f}")
+            st.write(f"Latest Up-Probability: {ai_result.latest_score:.2f}")
+            st.caption(ai_result.message)
+
+        st.subheader("Live Snapshot")
+        if st.button("Fetch Live Snapshot", width="stretch"):
+            try:
+                live_df = yf.download(
+                    config.symbol,
+                    period="5d",
+                    interval="5m",
+                    progress=False,
+                )
+                live_df = live_df[["Open", "High", "Low", "Close", "Volume"]]
+                live_df.columns = ["open", "high", "low", "close", "volume"]
+                live_signals = generate_crossover_signals(
+                    live_df,
+                    config.short_ma,
+                    config.long_ma,
+                    trend_filter=config.trend_filter,
+                    atr_period=config.atr_period,
+                    atr_stop_mult=config.atr_stop_mult,
+                    rsi_period=config.rsi_period,
+                    rsi_entry=config.rsi_entry,
+                    rsi_exit=config.rsi_exit,
+                    atr_vol_min=config.atr_vol_min,
+                )
+                latest = live_signals.iloc[-1]
+                action = "BUY" if latest == 1 else "SELL" if latest == -1 else "HOLD"
+                st.write(f"Latest bar: {live_df.index[-1]}")
+                st.write(f"Last close: {live_df['close'].iloc[-1]:.2f}")
+                st.write(f"Signal: {action}")
+            except Exception as exc:
+                st.error(f"Live snapshot error: {exc}")
 
         st.subheader("Equity vs Buy & Hold")
         fig2 = build_report_figure(df, config)
         ax = fig2.axes[-1]
         ax.plot(benchmark.index, benchmark, color="#facc15", linewidth=1.6, label="Buy & Hold")
         ax.legend(loc="upper left", frameon=False)
-        st.pyplot(fig2, use_container_width=True)
+        st.pyplot(fig2, width="stretch")
 
         png_buf = io.BytesIO()
         fig.savefig(png_buf, format="png", dpi=200, bbox_inches="tight")
@@ -249,9 +320,13 @@ if run_opt:
             max_combos=int(max_combos),
             commission_perc=config.commission,
             slippage_perc=config.slippage_perc,
+            rsi_period_list=[config.rsi_period],
+            rsi_entry_list=[config.rsi_entry],
+            rsi_exit_list=[config.rsi_exit],
+            atr_vol_min_list=[config.atr_vol_min],
         )
         st.subheader("Optimizer Leaderboard")
-        st.dataframe(results.head(20), use_container_width=True)
+        st.dataframe(results.head(20), width="stretch")
     except Exception as exc:
         st.error(f"Optimizer error: {exc}")
 
@@ -277,7 +352,7 @@ if run_wfo:
             max_combos=int(max_combos),
         )
         st.subheader("Walk-Forward Optimizer")
-        st.dataframe(wfo, use_container_width=True)
+        st.dataframe(wfo, width="stretch")
     except Exception as exc:
         st.error(f"Walk-forward error: {exc}")
 
@@ -299,6 +374,10 @@ if run_watchlist:
                     max_combos=120,
                     commission_perc=float(commission),
                     slippage_perc=float(slippage_perc) / 100.0,
+                    rsi_period_list=[int(rsi_period)],
+                    rsi_entry_list=[float(rsi_entry)],
+                    rsi_exit_list=[float(rsi_exit)],
+                    atr_vol_min_list=[float(atr_vol_min)],
                 )
                 best = results.iloc[0].to_dict() if not results.empty else {}
                 rows.append({"symbol": sym, **best})
@@ -310,6 +389,10 @@ if run_watchlist:
                     trend_filter=trend_filter,
                     atr_period=int(atr_period),
                     atr_stop_mult=float(atr_stop_mult),
+                    rsi_period=int(rsi_period),
+                    rsi_entry=float(rsi_entry),
+                    rsi_exit=float(rsi_exit),
+                    atr_vol_min=float(atr_vol_min),
                 )
                 metrics = compute_metrics(
                     df,
@@ -332,7 +415,7 @@ if run_watchlist:
             rows.append({"symbol": sym, "error": str(exc)})
 
     st.subheader("Watchlist Results")
-    st.dataframe(rows, use_container_width=True)
+    st.dataframe(rows, width="stretch")
 
 if run_portfolio:
     symbols = [s.strip().upper() for s in watchlist_raw.split(",") if s.strip()]
